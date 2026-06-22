@@ -3,7 +3,7 @@
 La práctica 07 queda lista para desplegarse en contenedores, igual que la práctica 06.
 
 Componentes:
-- `server`: servidor principal + API HTTP en `5001`
+- `server`: servidor principal + API HTTP en `5002`
 - `ticketing_service`: persistencia de tickets en `7000`
 - `frontend`: PWA estática en `80`
 
@@ -18,9 +18,9 @@ URLs:
 - Servidor/API: `http://localhost/api/...` desde el navegador público
 - Dashboard: `http://localhost/dashboard`
 
-Nota: el puerto `5001` queda para acceso directo al backend, pero en despliegue normal la PWA y el dashboard pasan por Nginx en `80`.
+Nota: el puerto `5002` queda para acceso directo al backend HTTP, y el socket interno usa `5001` dentro del contenedor.
 
-Si lo despliegas en una VM de Azure, abre los puertos `80`, `5001` y `7000` en el NSG.
+Si lo despliegas en una VM de Azure, abre los puertos `80`, `5002` y `7000` en el NSG.
 
 ## Implementación de PWA
 
@@ -34,7 +34,7 @@ Estructura:
 - webapp/: archivos estáticos de la PWA (index.html, app.js, styles.css, manifest.json, sw.js)
 
 Cómo probar localmente:
-1. Se debe tener corriendo el servidor de la práctica 07 (copia de la práctica 06) en el puerto 5000.
+1. Se debe tener corriendo el servidor de la práctica 07 en el puerto 5002.
 2. Desde la carpeta `07-App-PWA` se debe arrancar un servidor estático para servir `webapp`.
 
 Ejemplo (Python 3):
@@ -45,19 +45,19 @@ python -m http.server 8000 --directory webapp
 ```
 
 3. La apertura en el navegador corresponde a `http://localhost:8000/index.html` (o `http://127.0.0.1:8000/index.html`).
-4. Se selecciona el tipo de comprador, se espera a que se cargue el mapa y se prueban los asientos. La PWA llamará a los endpoints en `http://127.0.0.1:5000/api/...` por defecto.
+4. Se selecciona el tipo de comprador, se espera a que se cargue el mapa y se prueban los asientos. La PWA llamará a los endpoints en `http://127.0.0.1:5002/api/...` por defecto.
 
 Dashboard paralelo:
-- Se sirve desde el propio servidor en `http://127.0.0.1:5001/dashboard`.
+- Se sirve desde el propio servidor en `http://127.0.0.1:5002/dashboard`.
 - Permite ver estado, eventos, métricas, generar carga y reiniciar la venta.
 
 API server:
-- Esta copia del `servidor.py` expone un servidor HTTP en `127.0.0.1:5001` con los endpoints REST consumidos por la PWA:
+- Esta copia del `servidor.py` expone un servidor HTTP en `127.0.0.1:5002` con los endpoints REST consumidos por la PWA:
 	- `GET /api/availability` — estado de asientos y snapshot
 	- `POST /api/request_ticket` — crear una reserva (payload JSON)
 	- `POST /api/purchase` — confirmar compra (payload JSON)
 
-Nota: el servidor socket original sigue escuchando en el puerto configurado (por defecto 5000) para la PWA y sus hilos; la API HTTP utiliza el puerto 5001 para evitar conflictos.
+Nota: el servidor socket original sigue escuchando internamente en el puerto 5001; la API HTTP utiliza el puerto 5002 para evitar conflictos.
 
 Notas:
 - El Service Worker requiere servir desde `localhost` o HTTPS para poder registrarse.
@@ -106,7 +106,7 @@ python ticketing_service.py
 ```powershell
 cd 07-App-PWA
 . .venv\Scripts\Activate.ps1
-python servidor.py 1 --no-gui
+python servidor.py 1 --no-gui --port 5002
 ```
 
 3) Cliente de hilos (genera compradores simulados):

@@ -14,6 +14,6 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY . /app
 
-EXPOSE 5001 7000
+EXPOSE 5002 7000
 
-CMD ["python", "servidor.py", "1", "--host", "0.0.0.0", "--port", "5001", "--no-gui", "--ticket-service-host", "ticketing_service", "--ticket-service-port", "7000"]
+CMD ["python", "servidor.py", "1", "--host", "0.0.0.0", "--port", "5002", "--no-gui", "--ticket-service-host", "ticketing_service", "--ticket-service-port", "7000"]

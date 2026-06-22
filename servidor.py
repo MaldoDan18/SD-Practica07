@@ -1596,7 +1596,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Servidor de boletos - Múltiples clientes")
     parser.add_argument("expected_clients", type=int, help="Cantidad de clientes que deben conectarse antes de iniciar")
     parser.add_argument("--host", default="127.0.0.1", help="Host para escuchar conexiones")
-    parser.add_argument("--port", type=int, default=5000, help="Puerto para escuchar conexiones")
+    parser.add_argument("--port", type=int, default=5002, help="Puerto HTTP público para la API; el socket interno usa el puerto anterior")
     parser.add_argument("--no-gui", action="store_true", help="Ejecuta el servidor sin visualización")
     parser.add_argument("--sale-id", default=None, help="Identificador de esta venta/servidor")
     parser.add_argument("--ticket-service-host", default="127.0.0.1", help="Host del Ticketing Service externo")
@@ -1730,7 +1730,7 @@ def create_api(ticket_state, server):
 
     return app
 
-def run_api_thread(app, host='127.0.0.1', port=5001):
+def run_api_thread(app, host='127.0.0.1', port=5002):
     if app is None:
         print('[API] Flask not available; API endpoints disabled. Install Flask to enable API.')
         return None
@@ -1748,16 +1748,21 @@ def main():
         raise ValueError("expected_clients debe ser mayor que 0")
 
     expected_clients = args.expected_clients
-    sale_id = args.sale_id or f"{args.host}:{args.port}"
+    api_port = args.port
+    socket_port = api_port - 1
+    if socket_port <= 0:
+        raise ValueError("El puerto HTTP debe ser mayor que 1 para reservar el puerto interno del socket")
+
+    sale_id = args.sale_id or f"{args.host}:{api_port}"
 
     ticket_state = TicketState()
-    ticket_state.set_sale_context(sale_id, args.host, args.port)
+    ticket_state.set_sale_context(sale_id, args.host, api_port)
 
     ticketing_client = TicketingServiceClient(args.ticket_service_host, args.ticket_service_port)
     ticket_state.set_ticketing_client(ticketing_client)
 
     server = TicketServer(
-        (args.host, args.port),
+        (args.host, socket_port),
         TicketRequestHandler,
         ticket_state,
         expected_clients,
@@ -1765,7 +1770,7 @@ def main():
     )
 
     api_app = create_api(ticket_state, server)
-    run_api_thread(api_app, host=args.host, port=5001)
+    run_api_thread(api_app, host=args.host, port=api_port)
 
     monitor_thread = threading.Thread(target=monitor_sold_out, args=(ticket_state,), daemon=True)
     monitor_thread.start()
@@ -1774,7 +1779,8 @@ def main():
     cleanup_thread.start()
 
     print("Servidor de boletos iniciado")
-    print(f"Escuchando en {args.host}:{args.port}")
+    print(f"Socket TCP escuchando en {args.host}:{socket_port}")
+    print(f"HTTP API escuchando en {args.host}:{api_port}")
     print(f"Sale ID: {sale_id}")
     print(f"Asientos disponibles: {TOTAL_ASIENTOS}")
     print(f"Clientes esperados para iniciar: {expected_clients}")
