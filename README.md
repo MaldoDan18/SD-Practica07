@@ -15,8 +15,10 @@ docker compose up -d --build
 
 URLs:
 - PWA: `http://localhost/`
-- Servidor/API: `http://localhost:5001/`
-- Dashboard: `http://localhost:5001/dashboard`
+- Servidor/API: `http://localhost/api/...` desde el navegador público
+- Dashboard: `http://localhost/dashboard`
+
+Nota: el puerto `5001` queda para acceso directo al backend, pero en despliegue normal la PWA y el dashboard pasan por Nginx en `80`.
 
 Si lo despliegas en una VM de Azure, abre los puertos `80`, `5001` y `7000` en el NSG.
 

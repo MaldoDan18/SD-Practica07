@@ -1,5 +1,7 @@
-// API runs on port 5001 (socket server continues using 5000 for legacy clients)
-const API_BASE = location.hostname === 'localhost' ? 'http://127.0.0.1:5001' : `${location.protocol}//${location.hostname}:5001`;
+// Use the local server for localhost development, otherwise go through Nginx proxy on the same origin.
+const API_BASE = (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'http://127.0.0.1:5001'
+  : '/api';
 
 const seatMap = document.getElementById('seatMap');
 const buyerTypeEl = document.getElementById('buyerType');
