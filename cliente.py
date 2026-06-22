@@ -1,4 +1,4 @@
-# Practica 7 - PWA
+# Practica 6 - Servicios
 
 import argparse
 import json
@@ -105,15 +105,7 @@ def send_request(host, port, payload):
     return json.loads(response_bytes.decode("utf-8").strip())
 
 
-def notify_coordinator_client_connected(coordinator_host, coordinator_port, sale_id, client_id, buyers_count):
-    payload = {
-        "type": "CLIENT_CONNECTED",
-        "sale_id": sale_id,
-        "client_id": client_id,
-        "buyers": int(buyers_count),
-    }
-    response = send_request(coordinator_host, coordinator_port, payload)
-    return response
+# Coordinator integration removed for Docker/cloud deployment.
 
 
 def send_control_message(sock_file, payload):
@@ -319,31 +311,6 @@ def buyer_worker(local_buyer_number, host, port, client_id, client_type):
             metrics["attempts_fail"] += attempts
 
 
-def run_client_load(host, port, client_id, client_type, buyers):
-    global sales_start_ts, sales_end_ts
-
-    threads.clear()
-    sales_start_ts = time.perf_counter()
-
-    for buyer_number in range(1, buyers + 1):
-        thread = threading.Thread(
-            target=buyer_worker,
-            args=(buyer_number, host, port, client_id, client_type),
-            daemon=False,
-        )
-        threads.append(thread)
-        thread.start()
-        time.sleep(0.0005)
-
-    for thread in threads:
-        thread.join()
-
-    notify_client_done(host, port, client_id)
-
-    sales_end_ts = time.perf_counter()
-    print_summary(client_id, client_type, buyers)
-
-
 def print_summary(client_id, client_type, buyers_count):
     success = metrics["buyers_success"]
     fail = metrics["buyers_fail"]
@@ -377,9 +344,7 @@ def parse_args():
     parser.add_argument("--host", default="127.0.0.1", help="Host del servidor")
     parser.add_argument("--port", type=int, default=5000, help="Puerto del servidor")
     parser.add_argument("--client-id", default=None, help="Identificador único del punto de acceso")
-    parser.add_argument("--sale-id", default=None, help="ID de venta para sincronización con coordinador")
-    parser.add_argument("--coordinator-host", default=None, help="Host del coordinador global")
-    parser.add_argument("--coordinator-port", type=int, default=6000, help="Puerto del coordinador global")
+    parser.add_argument("--sale-id", default=None, help="ID de venta")
     return parser.parse_args()
 
 
@@ -410,31 +375,32 @@ def main():
         print(f"Tipo de compradores: {normalized_type}")
         print(f"Compradores a crear en este cliente: {args.buyers}")
 
-    if args.coordinator_host:
-        try:
-            response = notify_coordinator_client_connected(
-                args.coordinator_host,
-                args.coordinator_port,
-                sale_id,
-                client_id,
-                args.buyers,
-            )
-            with terminal_lock:
-                print(
-                    "Coordinador actualizado: "
-                    f"{response.get('connected_clients')}/{response.get('expected_clients')} clientes conectados para {sale_id}, "
-                    f"afluencia total: {response.get('total_buyer_threads')} hilos"
-                )
-        except Exception:
-            with terminal_lock:
-                print("[Coordinador] No se pudo notificar CLIENT_CONNECTED.")
+    # Coordinator integration removed — proceed without global sync.
 
     register_and_wait_start(args.host, args.port, client_id, normalized_type, args.buyers)
 
     health_thread = threading.Thread(target=monitor_server_health, args=(args.host, args.port), daemon=True)
     health_thread.start()
 
-    run_client_load(args.host, args.port, client_id, normalized_type, args.buyers)
+    sales_start_ts = time.perf_counter()
+
+    for buyer_number in range(1, args.buyers + 1):
+        thread = threading.Thread(
+            target=buyer_worker,
+            args=(buyer_number, args.host, args.port, client_id, normalized_type),
+            daemon=False,
+        )
+        threads.append(thread)
+        thread.start()
+        time.sleep(0.0005)
+
+    for thread in threads:
+        thread.join()
+
+    notify_client_done(args.host, args.port, client_id)
+
+    sales_end_ts = time.perf_counter()
+    print_summary(client_id, normalized_type, args.buyers)
 
 
 if __name__ == "__main__":

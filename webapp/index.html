@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Simulación Venta - PWA</title>
   <link rel="manifest" href="manifest.json" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=9" />
 </head>
 <body>
   <header>
@@ -19,6 +19,7 @@
       </select>
       <button id="refreshBtn">Actualizar</button>
       <button id="openCartBtn">Ver carrito (<span id="cartCount">0</span>)</button>
+      <button id="findSeatBtn" class="secondary">Encontrar mi asiento</button>
     </div>
   </header>
 
@@ -37,19 +38,35 @@
       <div id="seatMap">Cargando...</div>
     </section>
 
-    <aside id="cartPanel" class="hidden">
-      <h3>Carrito</h3>
-      <ul id="cartList"></ul>
-      <button id="buyAllBtn">Comprar seleccionados</button>
-      <button id="clearCartBtn">Vaciar carrito</button>
+    <div id="sideDock">
+    <aside id="cartPanel" class="dock-panel hidden">
+      <div class="cart-head">
+        <div>
+          <h3>Carrito</h3>
+        </div>
+      </div>
+      <div class="cart-actions">
+        <button id="buyAllBtn">Comprar seleccionados</button>
+        <button id="clearCartBtn" class="secondary">Vaciar carrito</button>
+      </div>
+      <ul id="cartList" class="cart-list"></ul>
     </aside>
 
-    <section id="logSection">
-      <h3>Actividad</h3>
-      <div id="log"></div>
-    </section>
+      <section id="purchasesPanel" class="dock-panel">
+        <div class="dock-panel-header">
+          <h3>Mis Compras</h3>
+          <button id="findPurchasesBtn" class="secondary small">Encontrar mi asiento</button>
+        </div>
+        <ul id="purchaseList" class="entry-list"></ul>
+      </section>
+
+      <section id="logSection" class="dock-panel">
+        <h3>Actividad</h3>
+        <div id="log"></div>
+      </section>
+    </div>
   </main>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

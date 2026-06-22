@@ -1,7 +1,7 @@
 {
   "name": "Venta de Boletos - PWA",
   "short_name": "BoletosPWA",
-  "start_url": "/webapp/index.html",
+  "start_url": "/index.html",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#1e3a8a",

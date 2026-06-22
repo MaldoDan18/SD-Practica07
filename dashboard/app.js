@@ -13,7 +13,6 @@ const elements = {
   loadStatus: document.getElementById('loadStatus'),
   seatTypeGrid: document.getElementById('seatTypeGrid'),
   miniSeatMap: document.getElementById('miniSeatMap'),
-  metricsList: document.getElementById('metricsList'),
   eventsList: document.getElementById('eventsList'),
   generateBtn: document.getElementById('generateBtn'),
   restartBtn: document.getElementById('restartBtn'),
@@ -42,28 +41,6 @@ function showToast(title, message, variant = 'info') {
   window.setTimeout(() => {
     toast.remove();
   }, 4200);
-}
-
-function formatMetricRows(metrics) {
-  const rows = [
-    ['Reservas solicitadas', metrics.request_ticket_count],
-    ['Reservas aceptadas', metrics.request_ticket_ok],
-    ['Compras procesadas', metrics.purchase_count],
-    ['Compras exitosas', metrics.purchase_ok],
-    ['Compras rechazadas', metrics.purchase_rejected],
-    ['Tickets solicitados', metrics.ticket_request_count],
-    ['Tickets emitidos', metrics.ticket_request_ok],
-    ['Tickets fallidos', metrics.ticket_request_fail],
-    ['Liberaciones por expiración', metrics.expired_releases],
-    ['Solicitudes antes del inicio', metrics.not_started_count],
-  ];
-
-  return rows.map(([label, value]) => `
-    <div class="metric-row">
-      <span>${escapeText(label)}</span>
-      <strong>${escapeText(value ?? 0)}</strong>
-    </div>
-  `).join('');
 }
 
 function renderSeatTypes(seatsByType) {
@@ -168,27 +145,14 @@ function renderLoadJobs(loadJobs) {
 }
 
 function updateOverlay(state, closeReason) {
-  if (state === 'open') {
-    elements.overlay.classList.add('hidden');
-    elements.overlay.setAttribute('aria-hidden', 'true');
-    return;
-  }
-
-  elements.overlay.classList.remove('hidden');
-  elements.overlay.setAttribute('aria-hidden', 'false');
-
   if (state === 'closed') {
+    elements.overlay.classList.remove('hidden');
+    elements.overlay.setAttribute('aria-hidden', 'false');
     elements.overlayTitle.textContent = 'Venta cerrada';
     elements.overlayText.textContent = closeReason ? `Motivo: ${closeReason}` : 'La venta terminó.';
-  } else if (state === 'countdown') {
-    elements.overlayTitle.textContent = 'Venta por iniciar';
-    elements.overlayText.textContent = 'Esperando el arranque de la simulación.';
-  } else if (state === 'waiting') {
-    elements.overlayTitle.textContent = 'Esperando inicio';
-    elements.overlayText.textContent = 'El servidor aún no abre la venta.';
   } else {
-    elements.overlayTitle.textContent = 'Cargando estado';
-    elements.overlayText.textContent = 'Esperando respuesta del servidor.';
+    elements.overlay.classList.add('hidden');
+    elements.overlay.setAttribute('aria-hidden', 'true');
   }
 }
 
@@ -201,7 +165,7 @@ function updateSummary(stats) {
     ? 'La simulación está corriendo.'
     : state === 'closed'
       ? `Cierre: ${stats.close_reason || 'n/a'}`
-      : 'La venta aún no se inicia.';
+      : 'La venta está activa.';
   elements.statusSubtext.textContent = 'Actualización por polling.';
 
   elements.saleId.textContent = stats.sale_id || 'n/a';

@@ -1,3 +1,25 @@
+## Docker
+
+La práctica 07 queda lista para desplegarse en contenedores, igual que la práctica 06.
+
+Componentes:
+- `server`: servidor principal + API HTTP en `5001`
+- `ticketing_service`: persistencia de tickets en `7000`
+- `frontend`: PWA estática en `80`
+
+Arranque:
+
+```bash
+docker compose up -d --build
+```
+
+URLs:
+- PWA: `http://localhost/`
+- Servidor/API: `http://localhost:5001/`
+- Dashboard: `http://localhost:5001/dashboard`
+
+Si lo despliegas en una VM de Azure, abre los puertos `80`, `5001` y `7000` en el NSG.
+
 ## Implementación de PWA
 
 Una Progressive Web App (PWA) es una aplicación web que incorpora capacidades propias de una app instalada, como funcionamiento desde el navegador, almacenamiento local y soporte para experiencias más fluidas.
@@ -28,17 +50,16 @@ Dashboard paralelo:
 - Permite ver estado, eventos, métricas, generar carga y reiniciar la venta.
 
 API server:
-- Esta copia del `servidor.py` expone un pequeño servidor HTTP en `127.0.0.1:5001` con los endpoints REST consumidos por la PWA:
+- Esta copia del `servidor.py` expone un servidor HTTP en `127.0.0.1:5001` con los endpoints REST consumidos por la PWA:
 	- `GET /api/availability` — estado de asientos y snapshot
 	- `POST /api/request_ticket` — crear una reserva (payload JSON)
 	- `POST /api/purchase` — confirmar compra (payload JSON)
 
-Nota: el servidor socket original sigue escuchando en el puerto configurado (por defecto 5000) para los clientes por hilos; la API HTTP utiliza el puerto 5001 para evitar conflictos.
+Nota: el servidor socket original sigue escuchando en el puerto configurado (por defecto 5000) para la PWA y sus hilos; la API HTTP utiliza el puerto 5001 para evitar conflictos.
 
 Notas:
 - El Service Worker requiere servir desde `localhost` o HTTPS para poder registrarse.
 - La PWA guarda el carrito en `localStorage` y registra un `buyer_id` local para identificar al cliente frente al servidor.
-- No se modifican las prácticas 01-06; el trabajo se mantiene dentro de `07-App-PWA`.
 
 Setup rápido (desarrollo)
 -------------------------
@@ -78,31 +99,23 @@ cd 07-App-PWA
 python ticketing_service.py
 ```
 
-2) (Opcional) Coordinador global (para sincronizar múltiples servidores):
+2) Servidor de venta (proporciona API HTTP y socket TCP):
 
 ```powershell
 cd 07-App-PWA
 . .venv\Scripts\Activate.ps1
-python coordinador.py 1 --no-gui
+python servidor.py 1 --no-gui
 ```
 
-3) Servidor de venta (proporciona API HTTP y socket TCP):
+3) Cliente de hilos (genera compradores simulados):
 
 ```powershell
 cd 07-App-PWA
 . .venv\Scripts\Activate.ps1
-python servidor.py 1 --coordinator-host 127.0.0.1 --coordinator-port 6000 --no-gui
+python cliente.py normal 1
 ```
 
-4) Cliente de hilos (genera compradores simulados):
-
-```powershell
-cd 07-App-PWA
-. .venv\Scripts\Activate.ps1
-python cliente.py normal 1 --coordinator-host 127.0.0.1 --coordinator-port 6000
-```
-
-5) Servir la PWA (static):
+4) Servir la PWA (static):
 
 ```powershell
 cd 07-App-PWA

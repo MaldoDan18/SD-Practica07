@@ -1,0 +1,27 @@
+services:
+  frontend:
+    build:
+      context: ./webapp
+    ports:
+      - "80:80"
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+    command: ["python", "servidor.py", "1", "--host", "0.0.0.0", "--port", "5001", "--no-gui", "--ticket-service-host", "ticketing_service", "--ticket-service-port", "7000"]
+    ports:
+      - "5001:5001"
+    depends_on:
+      - ticketing_service
+    restart: unless-stopped
+
+  ticketing_service:
+    build:
+      context: .
+    command: ["python", "ticketing_service.py", "--host", "0.0.0.0", "--port", "7000", "--store-file", "tickets/tickets.txt"]
+    ports:
+      - "7000:7000"
+    volumes:
+      - ./tickets:/app/tickets
+    restart: unless-stopped

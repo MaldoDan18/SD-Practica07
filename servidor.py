@@ -18,7 +18,7 @@ except Exception:
 FILAS = 30
 COLUMNAS = 50
 TOTAL_ASIENTOS = FILAS * COLUMNAS
-RESERVA_TTL_SEGUNDOS = 5.0
+RESERVA_TTL_SEGUNDOS = 20.0
 SECTION_GAP_ROWS = 2
 SECTION_LABEL_ROWS = 1
 
@@ -326,7 +326,7 @@ class TicketState:
             self.sales_closed_event.set()
             self.sold_out_event.set()
             return True
-        # Do NOT close for unsellable_remaining; let coordinator or Ctrl+C terminate
+                # Do NOT close for unsellable_remaining; let Ctrl+C terminate or the dashboard reset the sale
         return False
 
     def _cleanup_expired_zone_locked(self, zone):
@@ -668,6 +668,59 @@ class TicketState:
         finally:
             zone_lock.release()
 
+    def release_reservation(self, buyer_id, reservation_id, request_id):
+        started = time.perf_counter()
+
+        if not reservation_id:
+            return {"status": "error", "code": "missing_reservation_id"}
+
+        with self.meta_lock:
+            zone = self.reservation_to_zone.get(reservation_id)
+
+        if zone is None:
+            return {"status": "error", "code": "invalid_or_expired_reservation"}
+
+        zone_lock = self.zone_locks[zone]
+        acquired = zone_lock.acquire(timeout=0.05)
+        if not acquired:
+            return {"status": "error", "code": "zone_busy_retry"}
+
+        try:
+            self._cleanup_expired_zone_locked(zone)
+            info = self.reservations_by_zone[zone].get(reservation_id)
+            if info is None:
+                return {"status": "error", "code": "invalid_or_expired_reservation"}
+
+            if buyer_id and info["buyer_id"] != str(buyer_id):
+                return {"status": "error", "code": "reservation_owner_mismatch"}
+
+            row, col = info["seat"]
+            self.reservations_by_zone[zone].pop(reservation_id, None)
+            self.zone_free_seats[zone].add((row, col))
+            self.seat_status[row][col] = "FREE"
+
+            with self.meta_lock:
+                self.reservation_to_zone.pop(reservation_id, None)
+                self.metrics["purchase_time_total"] += time.perf_counter() - started
+
+            self._record_event(
+                "reservation_released",
+                buyer_id=str(buyer_id) if buyer_id else None,
+                reservation_id=reservation_id,
+                zone=zone,
+                seat={"row": row, "col": col},
+                request_id=request_id,
+            )
+
+            return {
+                "status": "ok",
+                "reservation_id": reservation_id,
+                "zone": zone,
+                "seat": {"row": row, "col": col},
+            }
+        finally:
+            zone_lock.release()
+
     def get_snapshot(self):
         lock_order = [self.zone_locks[ZONA_PLATINO], self.zone_locks[ZONA_PREFERENTE], self.zone_locks[ZONA_NORMAL]]
         for lock in lock_order:
@@ -676,6 +729,20 @@ class TicketState:
         try:
             seat_status_copy = [row[:] for row in self.seat_status]
             reserved_count = sum(len(self.reservations_by_zone[z]) for z in self.reservations_by_zone)
+            seats_by_type = {}
+            for buyer_type, allowed_zones in ALLOWED_ZONES_BY_TYPE.items():
+                free_count = 0
+                reserved_by_type = 0
+                sold_by_type = self.purchased_by_type.get(buyer_type, 0)
+                for zone in allowed_zones:
+                    free_count += len(self.zone_free_seats[zone])
+                    reserved_by_type += len(self.reservations_by_zone[zone])
+                seats_by_type[buyer_type] = {
+                    "free": free_count,
+                    "reserved": reserved_by_type,
+                    "sold": sold_by_type,
+                    "total": free_count + reserved_by_type + sold_by_type,
+                }
             with self.meta_lock:
                 return {
                     "sold_count": self.sold_count,
@@ -689,6 +756,7 @@ class TicketState:
                     "close_reason": self.close_reason,
                     "sales_open": self.sales_open_event.is_set(),
                     "sales_closed": self.sales_closed_event.is_set(),
+                    "seats_by_type": seats_by_type,
                 }
         finally:
             for lock in reversed(lock_order):
@@ -791,7 +859,7 @@ class DashboardLoadManager:
         )
         return dict(job)
 
-    def _run_internal_load(self, buyers, client_type, worker_delay=(0.01, 0.05)):
+    def _run_internal_load(self, buyers, client_type, worker_delay=(0.0, 0.005)):
         buyers = max(1, int(buyers))
         client_type = (client_type or TIPO_NORMAL).lower()
         stats = {"success": 0, "fail": 0}
@@ -799,6 +867,7 @@ class DashboardLoadManager:
         def buyer_worker(buyer_number):
             buyer_id = f"DASH-{uuid.uuid4().hex[:6].upper()}-B{buyer_number}"
             purchased = False
+            consecutive_no_zone = 0
 
             while not self.ticket_state.sales_closed() and not self.ticket_state.sold_out_event.is_set():
                 time.sleep(random.uniform(*worker_delay))
@@ -809,11 +878,12 @@ class DashboardLoadManager:
                 reserve_response = self.ticket_state.request_ticket(buyer_id, client_type, str(uuid.uuid4()))
                 reserve_status = reserve_response.get("status")
                 if reserve_status == "ok":
+                    consecutive_no_zone = 0
                     reservation_id = reserve_response.get("reservation_id")
                     if not reservation_id:
                         continue
 
-                    time.sleep(random.uniform(0.03, 0.10))
+                    time.sleep(random.uniform(0.0, 0.008))
                     purchase_response = self.ticket_state.purchase(buyer_id, reservation_id, str(uuid.uuid4()))
                     if purchase_response.get("status") == "ok":
                         purchased = True
@@ -831,8 +901,15 @@ class DashboardLoadManager:
                     continue
 
                 if reserve_status == "error" and reserve_response.get("code") == "no_zone_available":
+                    consecutive_no_zone += 1
                     if self.ticket_state.sales_closed() or self.ticket_state.sold_out_event.is_set() or not self._type_can_keep_trying(client_type):
                         break
+                    if consecutive_no_zone < 8:
+                        continue
+                    time.sleep(0.01)
+                    continue
+
+                if reserve_status == "error" and reserve_response.get("code") in {"zone_busy", "zone_busy_retry"}:
                     continue
 
                 continue
@@ -873,7 +950,7 @@ class DashboardLoadManager:
                 continue
             if row_index >= 7 and ZONA_NORMAL not in zones:
                 continue
-            if any(state == "FREE" for state in row):
+            if any(state != "SOLD" for state in row):
                 return True
         return False
 
@@ -898,28 +975,20 @@ class TicketServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
     block_on_close = False
 
-    def __init__(self, server_address, handler_class, ticket_state, expected_clients, sale_id, use_global_sync=False):
+    def __init__(self, server_address, handler_class, ticket_state, expected_clients, sale_id):
         super().__init__(server_address, handler_class)
         self.ticket_state = ticket_state
         self.expected_clients = expected_clients
         self.sale_id = sale_id
-        self.use_global_sync = use_global_sync
         self.registration_lock = threading.Lock()
         self.connected_clients = {}
         self.ready_clients = set()
         self.done_clients = set()
         self.start_event = threading.Event()
         self.all_ready_event = threading.Event()
-        self.global_start_event = threading.Event()
-        self.coordinator_client = None
         self.dashboard_loads = DashboardLoadManager(ticket_state)
         self.countdown_started_at = None
         self.countdown_duration = 0.0
-        if not self.use_global_sync:
-            self.global_start_event.set()
-
-    def set_coordinator_client(self, coordinator_client):
-        self.coordinator_client = coordinator_client
 
     def begin_countdown(self, duration_seconds=5.0):
         with self.registration_lock:
@@ -964,10 +1033,10 @@ class TicketServer(socketserver.ThreadingTCPServer):
             "ready_clients": ready_clients,
             "done_clients": done_clients,
             "expected_clients": self.expected_clients,
-            "use_global_sync": self.use_global_sync,
         }
 
     def register_client(self, client_id, client_type, buyers_count):
+        should_activate = False
         with self.registration_lock:
             self.connected_clients[client_id] = {
                 "client_type": client_type,
@@ -976,11 +1045,12 @@ class TicketServer(socketserver.ThreadingTCPServer):
             }
             self.ticket_state.register_client_buyers(client_type, buyers_count)
             connected = len(self.connected_clients)
-        
-        # Notificar al coordinador si existe
-        if self.coordinator_client is not None:
-            self.coordinator_client.notify_client_connected(self.sale_id, client_id, buyers_count)
-        
+            if not self.start_event.is_set():
+                should_activate = True
+
+        if should_activate:
+            self.trigger_start()
+
         return connected
 
     def mark_ready(self, client_id):
@@ -999,8 +1069,6 @@ class TicketServer(socketserver.ThreadingTCPServer):
         if all_ready:
             with self.ticket_state.terminal_lock:
                 print("Todos los clientes esperados están listos localmente.")
-            if not self.use_global_sync:
-                self.global_start_event.set()
 
         return ready_count
 
@@ -1024,123 +1092,6 @@ class TicketServer(socketserver.ThreadingTCPServer):
             print(f"Cliente {client_id} reportó fin de ejecución ({done_count}/{self.expected_clients})")
         
         return done_count
-
-
-class CoordinatorClient:
-    def __init__(self, host, port, sale_id, server_host, server_port, expected_clients, terminal_lock, on_global_start=None):
-        self.host = host
-        self.port = port
-        self.sale_id = sale_id
-        self.server_host = server_host
-        self.server_port = server_port
-        self.expected_clients = expected_clients
-        self.terminal_lock = terminal_lock
-        self.on_global_start = on_global_start
-
-        self.sock = None
-        self.sock_file = None
-        self.write_lock = threading.Lock()
-        self.global_start_event = threading.Event()
-        self.listener_thread = None
-
-    def start(self):
-        self.sock = socket.create_connection((self.host, self.port), timeout=8.0)
-        self.sock.settimeout(None)
-        self.sock_file = self.sock.makefile("rwb")
-
-        self._send(
-            {
-                "type": "SERVER_REGISTER",
-                "sale_id": self.sale_id,
-                "server_host": self.server_host,
-                "server_port": self.server_port,
-                "expected_clients": self.expected_clients,
-            }
-        )
-
-        self.listener_thread = threading.Thread(target=self._listen_loop, daemon=True)
-        self.listener_thread.start()
-
-    def _send(self, payload):
-        if self.sock_file is None:
-            raise ConnectionError("Socket de coordinador no inicializado")
-        with self.write_lock:
-            self.sock_file.write((json.dumps(payload) + "\n").encode("utf-8"))
-            self.sock_file.flush()
-
-    def notify_client_connected(self, sale_id, client_id, buyers_count):
-        """Notifica al coordinador que un cliente se ha conectado."""
-        self._send({
-            "type": "CLIENT_CONNECTED",
-            "sale_id": sale_id,
-            "client_id": client_id,
-            "buyers": int(buyers_count),
-        })
-
-    def _listen_loop(self):
-        try:
-            while True:
-                raw_line = self.sock_file.readline()
-                if not raw_line:
-                    break
-                try:
-                    payload = json.loads(raw_line.decode("utf-8").strip())
-                except json.JSONDecodeError:
-                    continue
-
-                message_type = (payload.get("type") or "").upper()
-                if message_type == "GLOBAL_START":
-                    self.global_start_event.set()
-                    if self.on_global_start is not None:
-                        self.on_global_start()
-                    with self.terminal_lock:
-                        print("[Coordinador] Señal GLOBAL_START recibida.")
-                elif message_type == "REGISTERED_ACK":
-                    with self.terminal_lock:
-                        print(
-                            f"[Coordinador] Registrado {self.sale_id}. "
-                            f"Servidores registrados: {payload.get('registered_servers')}/{payload.get('expected_servers')}"
-                        )
-                elif message_type == "SERVER_FINISHED_ACK":
-                    with self.terminal_lock:
-                        print(f"[Coordinador] Resumen final recibido para {payload.get('sale_id')}.")
-                elif message_type == "SERVER_DISCONNECT_ACK":
-                    pass
-                elif message_type == "ERROR":
-                    with self.terminal_lock:
-                        print(f"[Coordinador] Error: {payload.get('message') or payload.get('code')}")
-        except Exception:
-            with self.terminal_lock:
-                print("[Coordinador] Conexión finalizada inesperadamente.")
-
-    def notify_finished(self, finish_summary):
-        self._send(
-            {
-                "type": "SERVER_FINISHED",
-                "sale_id": self.sale_id,
-                "finish_summary": finish_summary,
-            }
-        )
-
-    def close(self):
-        try:
-            if self.sock_file is not None:
-                self._send({"type": "SERVER_DISCONNECT", "sale_id": self.sale_id})
-        except Exception:
-            pass
-
-        try:
-            if self.sock_file is not None:
-                self.sock_file.close()
-                self.sock_file = None
-        except Exception:
-            pass
-        try:
-            if self.sock is not None:
-                self.sock.close()
-                self.sock = None
-        except Exception:
-            pass
 
 
 class TicketRequestHandler(socketserver.StreamRequestHandler):
@@ -1217,6 +1168,14 @@ class TicketRequestHandler(socketserver.StreamRequestHandler):
                 reservation_id = payload.get("reservation_id")
                 response = self.server.ticket_state.purchase(buyer_id, reservation_id, request_id)
                 response["type"] = "PURCHASE_RESPONSE"
+                self.send_json(response)
+                continue
+
+            if message_type == "RELEASE_RESERVATION":
+                buyer_id = payload.get("buyer_id")
+                reservation_id = payload.get("reservation_id")
+                response = self.server.ticket_state.release_reservation(buyer_id, reservation_id, request_id)
+                response["type"] = "RELEASE_RESERVATION_RESPONSE"
                 self.send_json(response)
                 continue
 
@@ -1509,22 +1468,6 @@ class ServerDashboard:
         if not self.waiting_mode:
             return
 
-        if self.server.use_global_sync:
-            if not self.server.global_start_event.is_set():
-                with self.server.registration_lock:
-                    connected = len(self.server.connected_clients)
-                    ready = len(self.server.ready_clients)
-                expected = self.server.expected_clients
-                self.waiting_label.config(text="Esperando señal global del coordinador...")
-                self.waiting_sublabel.config(
-                    text=f"Local: {connected}/{expected} conectados · {ready}/{expected} READY"
-                )
-                self.root.after(200, self._check_ready_phase)
-                return
-
-            self._start_countdown()
-            return
-
         if self.server.all_ready_event.is_set():
             self._start_countdown()
             return
@@ -1622,7 +1565,7 @@ def cleanup_expired_reservations(ticket_state):
         time.sleep(0.25)
 
 
-def monitor_sold_out(ticket_state, coordinator_client=None):
+def monitor_sold_out(ticket_state):
     ticket_state.sold_out_event.wait()
     with ticket_state.meta_lock:
         sold_count = ticket_state.sold_count
@@ -1637,17 +1580,6 @@ def monitor_sold_out(ticket_state, coordinator_client=None):
         if sold_count >= TOTAL_ASIENTOS and need_100:
             ticket_state.hitos_reportados.add(100)
 
-        finish_summary = {
-            "sold_count": sold_count,
-            "total_seats": TOTAL_ASIENTOS,
-            "empty_seats": TOTAL_ASIENTOS - sold_count,
-            "sale_elapsed_seconds": float(sale_elapsed),
-            "close_reason": close_reason,
-            "unique_buyers": len(ticket_state.unique_buyers),
-            "request_ticket_count": ticket_state.metrics["request_ticket_count"],
-            "purchase_count": ticket_state.metrics["purchase_count"],
-        }
-
     with ticket_state.terminal_lock:
         if sold_count >= TOTAL_ASIENTOS and need_100:
             print(f"Actualización: 100% de boletos vendidos ({sold_count}/{TOTAL_ASIENTOS}).")
@@ -1656,13 +1588,6 @@ def monitor_sold_out(ticket_state, coordinator_client=None):
         if close_reason == "unsellable_remaining":
             print(f"Actualización: venta cerrada porque los asientos restantes no tienen compradores elegibles ({sold_count}/{TOTAL_ASIENTOS} vendidos).")
         print("Actualización: la venta ha concluido.")
-
-    if coordinator_client is not None:
-        try:
-            coordinator_client.notify_finished(finish_summary)
-        except Exception:
-            with ticket_state.terminal_lock:
-                print("[Coordinador] No se pudo notificar SERVER_FINISHED.")
 
     ticket_state.print_summary_once()
 
@@ -1674,8 +1599,6 @@ def parse_args():
     parser.add_argument("--port", type=int, default=5000, help="Puerto para escuchar conexiones")
     parser.add_argument("--no-gui", action="store_true", help="Ejecuta el servidor sin visualización")
     parser.add_argument("--sale-id", default=None, help="Identificador de esta venta/servidor")
-    parser.add_argument("--coordinator-host", default=None, help="Host del coordinador global")
-    parser.add_argument("--coordinator-port", type=int, default=6000, help="Puerto del coordinador global")
     parser.add_argument("--ticket-service-host", default="127.0.0.1", help="Host del Ticketing Service externo")
     parser.add_argument("--ticket-service-port", type=int, default=7000, help="Puerto del Ticketing Service externo")
     return parser.parse_args()
@@ -1779,6 +1702,14 @@ def create_api(ticket_state, server):
     def dashboard_restart_sale():
         ticket_state.reset_sale()
         server.dashboard_loads.clear_jobs()
+        with server.registration_lock:
+            server.connected_clients.clear()
+            server.ready_clients.clear()
+            server.done_clients.clear()
+            server.start_event.clear()
+            server.all_ready_event.clear()
+            server.countdown_started_at = None
+        server.trigger_start()
         tickets_path = Path(__file__).resolve().parent / 'tickets' / 'tickets.txt'
         try:
             if tickets_path.exists():
@@ -1808,7 +1739,6 @@ def main():
 
     expected_clients = args.expected_clients
     sale_id = args.sale_id or f"{args.host}:{args.port}"
-    use_global_sync = bool(args.coordinator_host)
 
     ticket_state = TicketState()
     ticket_state.set_sale_context(sale_id, args.host, args.port)
@@ -1822,28 +1752,12 @@ def main():
         ticket_state,
         expected_clients,
         sale_id,
-        use_global_sync=use_global_sync,
     )
-    coordinator_client = None
-
-    if use_global_sync:
-        coordinator_client = CoordinatorClient(
-            args.coordinator_host,
-            args.coordinator_port,
-            sale_id,
-            args.host,
-            args.port,
-            expected_clients,
-            ticket_state.terminal_lock,
-            on_global_start=server.global_start_event.set,
-        )
-        coordinator_client.start()
-        server.set_coordinator_client(coordinator_client)
 
     api_app = create_api(ticket_state, server)
     run_api_thread(api_app, host=args.host, port=5001)
 
-    monitor_thread = threading.Thread(target=monitor_sold_out, args=(ticket_state, coordinator_client), daemon=True)
+    monitor_thread = threading.Thread(target=monitor_sold_out, args=(ticket_state,), daemon=True)
     monitor_thread.start()
 
     cleanup_thread = threading.Thread(target=cleanup_expired_reservations, args=(ticket_state,), daemon=True)
@@ -1856,16 +1770,10 @@ def main():
     print(f"Clientes esperados para iniciar: {expected_clients}")
     print("Zonas: PLATINO (filas 1-3), PREFERENTE (4-7), NORMAL (8-30)")
     print(f"Ticketing Service: {args.ticket_service_host}:{args.ticket_service_port}")
-    if use_global_sync:
-        print(f"Coordinador global: {args.coordinator_host}:{args.coordinator_port}")
 
     if args.no_gui:
         def wait_and_start():
-            if server.use_global_sync:
-                print("Esperando sincronización global de servidores...")
-                server.global_start_event.wait()
-            else:
-                server.all_ready_event.wait()
+            server.all_ready_event.wait()
             server.begin_countdown(5.0)
             for i in range(5, 0, -1):
                 print(f"  Iniciando en {i}...")
@@ -1884,8 +1792,6 @@ def main():
         finally:
             server.shutdown()
             server.server_close()
-            if coordinator_client is not None:
-                coordinator_client.close()
             ticket_state.print_summary_once()
         return
 
@@ -1901,8 +1807,6 @@ def main():
             ticket_state.close_sales("interface_error")
         server.shutdown()
         server.server_close()
-        if coordinator_client is not None:
-            coordinator_client.close()
         ticket_state.print_summary_once()
     except KeyboardInterrupt:
         print("\n[Servidor] Interrupción recibida. Cerrando servidor...")
@@ -1910,12 +1814,9 @@ def main():
             ticket_state.close_sales("interrupted")
         server.shutdown()
         server.server_close()
-        if coordinator_client is not None:
-            coordinator_client.close()
         ticket_state.print_summary_once()
     finally:
-        if coordinator_client is not None:
-            coordinator_client.close()
+        pass
 
 
 if __name__ == "__main__":
