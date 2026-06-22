@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard de Venta - P7</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <div id="toastArea" class="toast-area" aria-live="polite" aria-atomic="true"></div>
+    <div id="overlay" class="overlay hidden" aria-hidden="true">
+      <div class="overlay-card">
+        <div class="overlay-kicker">Estado de la venta</div>
+        <h2 id="overlayTitle">Cargando...</h2>
+        <p id="overlayText">Esperando respuesta del servidor.</p>
+      </div>
+    </div>
+
+    <header class="hero card">
+      <div>
+        <p class="eyebrow">SD-Practica07 · Dashboard paralelo</p>
+        <h1>Monitoreo de venta y carga</h1>
+        <p class="lead">Vista de estado para la venta PWA, con carga interna, eventos y reinicio de la venta.</p>
+      </div>
+      <div class="status-box">
+        <span id="statusBadge" class="status-badge">Esperando</span>
+        <p id="statusText" class="status-text">Conectando al servidor...</p>
+        <p id="statusSubtext" class="status-subtext">Actualización por polling.</p>
+      </div>
+    </header>
+
+    <section class="toolbar card">
+      <div class="field">
+        <label for="buyersInput">Compradores concurrentes</label>
+        <input id="buyersInput" type="number" min="1" max="1500" value="100" />
+      </div>
+      <div class="field">
+        <label for="buyerType">Tipo de comprador</label>
+        <select id="buyerType">
+          <option value="normal">Normal</option>
+          <option value="preferente">Preferente</option>
+          <option value="platino">Platino</option>
+        </select>
+      </div>
+      <div class="actions">
+        <button id="generateBtn" class="primary">Generar carga</button>
+        <button id="restartBtn" class="secondary">Reiniciar venta</button>
+      </div>
+      <div class="toolbar-meta">
+        <span>Sale ID: <strong id="saleId">n/a</strong></span>
+        <span id="lastRefresh">Sin datos</span>
+      </div>
+    </section>
+
+    <main class="dashboard">
+      <section class="dashboard-main">
+        <section class="card metrics-grid">
+          <article class="metric"><span>Vendidos</span><strong id="soldCount">0</strong></article>
+          <article class="metric"><span>Reservados</span><strong id="reservedCount">0</strong></article>
+          <article class="metric"><span>Libres</span><strong id="freeCount">0</strong></article>
+          <article class="metric accent"><span>Tickets emitidos</span><strong id="ticketsCount">0</strong></article>
+          <article class="metric"><span>Compradores detectados</span><strong id="buyersCreated">0</strong></article>
+          <article class="metric"><span>Carga interna</span><strong id="loadStatus">Sin cargas activas.</strong></article>
+        </section>
+
+        <section class="card panel">
+          <div class="panel-head">
+            <h2>Tipos de asiento</h2>
+            <p>Distribución en tiempo real por zona.</p>
+          </div>
+          <div id="seatTypeGrid" class="seat-type-grid"></div>
+        </section>
+
+        <section class="card panel">
+          <div class="panel-head">
+            <h2>Métricas del servidor</h2>
+            <p>Estado agregado de la venta y del ticketing.</p>
+          </div>
+          <div id="metricsList" class="metrics-list"></div>
+        </section>
+      </section>
+
+      <aside class="card sidebar">
+        <div class="panel-head">
+          <h2>Mapa simplificado</h2>
+          <p>Estados en tiempo real de todo el auditorio.</p>
+        </div>
+
+        <div class="legend">
+          <span><i class="swatch free"></i> Libre</span>
+          <span><i class="swatch reserved"></i> Reservado</span>
+          <span><i class="swatch sold"></i> Comprado</span>
+        </div>
+
+        <div id="miniSeatMap" class="mini-seat-map" aria-label="Mapa simplificado de asientos"></div>
+
+        <section class="card events-card">
+          <div class="panel-head">
+            <h2>Eventos recientes</h2>
+            <p>Reservas, compras, cierres y cargas.</p>
+          </div>
+          <ul id="eventsList" class="events-list"></ul>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

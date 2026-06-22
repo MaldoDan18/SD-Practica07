@@ -4,6 +4,8 @@ Una Progressive Web App (PWA) es una aplicación web que incorpora capacidades p
 
 En esta práctica se implementa una PWA cliente para la simulación de venta de boletos, con el fin de ofrecer una interfaz visual para seleccionar asientos, reservarlos y concretar la compra sin alterar la lógica principal del servidor.
 
+Además, se agrega un dashboard paralelo para monitoreo y control de la venta, sin tocar el flujo de la PWA.
+
 Estructura:
 - webapp/: archivos estáticos de la PWA (index.html, app.js, styles.css, manifest.json, sw.js)
 
@@ -20,6 +22,10 @@ python -m http.server 8000 --directory webapp
 
 3. La apertura en el navegador corresponde a `http://localhost:8000/index.html` (o `http://127.0.0.1:8000/index.html`).
 4. Se selecciona el tipo de comprador, se espera a que se cargue el mapa y se prueban los asientos. La PWA llamará a los endpoints en `http://127.0.0.1:5000/api/...` por defecto.
+
+Dashboard paralelo:
+- Se sirve desde el propio servidor en `http://127.0.0.1:5001/dashboard`.
+- Permite ver estado, eventos, métricas, generar carga y reiniciar la venta.
 
 API server:
 - Esta copia del `servidor.py` expone un pequeño servidor HTTP en `127.0.0.1:5001` con los endpoints REST consumidos por la PWA:

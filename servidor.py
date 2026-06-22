@@ -11,7 +11,7 @@ import tkinter as tk
 import uuid
 from pathlib import Path
 try:
-    from flask import Flask, request, jsonify, make_response
+    from flask import Flask, request, jsonify, make_response, send_from_directory
 except Exception:
     Flask = None
 
@@ -236,6 +236,7 @@ class TicketState:
         finally:
             for lock in reversed(lock_order):
                 lock.release()
+
 
     def register_buyer(self, buyer_id):
         if not buyer_id:
@@ -738,6 +739,160 @@ class TicketState:
             print("==========================================\n")
 
 
+class DashboardLoadManager:
+    def __init__(self, ticket_state):
+        self.ticket_state = ticket_state
+        self.lock = threading.Lock()
+        self.jobs = {}
+
+    def start_job(self, buyers=50, client_type=TIPO_NORMAL):
+        job_id = uuid.uuid4().hex[:12]
+        job = {
+            "job_id": job_id,
+            "status": "running",
+            "buyers": max(1, int(buyers)),
+            "client_type": (client_type or TIPO_NORMAL).lower(),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "started_at": time.perf_counter(),
+            "finished_at": None,
+            "result": None,
+            "error": None,
+        }
+
+        with self.lock:
+            self.jobs[job_id] = job
+
+        def worker():
+            try:
+                result = self._run_internal_load(job["buyers"], job["client_type"])
+                job["result"] = result
+                job["status"] = "finished"
+                self.ticket_state._record_event(
+                    "dashboard_load_finished",
+                    job_id=job_id,
+                    buyers=job["buyers"],
+                    result=result,
+                )
+            except Exception as exc:
+                job["status"] = "error"
+                job["error"] = str(exc)
+                self.ticket_state._record_event("dashboard_load_error", job_id=job_id, error=str(exc))
+            finally:
+                job["finished_at"] = time.perf_counter()
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        job["thread_name"] = thread.name
+        self.ticket_state._record_event(
+            "dashboard_load_started",
+            job_id=job_id,
+            buyers=job["buyers"],
+            client_type=job["client_type"],
+        )
+        return dict(job)
+
+    def _run_internal_load(self, buyers, client_type, worker_delay=(0.01, 0.05)):
+        buyers = max(1, int(buyers))
+        client_type = (client_type or TIPO_NORMAL).lower()
+        stats = {"success": 0, "fail": 0}
+
+        def buyer_worker(buyer_number):
+            buyer_id = f"DASH-{uuid.uuid4().hex[:6].upper()}-B{buyer_number}"
+            purchased = False
+
+            while not self.ticket_state.sales_closed() and not self.ticket_state.sold_out_event.is_set():
+                time.sleep(random.uniform(*worker_delay))
+
+                if not self._type_can_keep_trying(client_type):
+                    break
+
+                reserve_response = self.ticket_state.request_ticket(buyer_id, client_type, str(uuid.uuid4()))
+                reserve_status = reserve_response.get("status")
+                if reserve_status == "ok":
+                    reservation_id = reserve_response.get("reservation_id")
+                    if not reservation_id:
+                        continue
+
+                    time.sleep(random.uniform(0.03, 0.10))
+                    purchase_response = self.ticket_state.purchase(buyer_id, reservation_id, str(uuid.uuid4()))
+                    if purchase_response.get("status") == "ok":
+                        purchased = True
+                        if int(purchase_response.get("remaining") or 1) <= 0:
+                            self.ticket_state.sold_out_event.set()
+                        break
+
+                    if purchase_response.get("status") in {"closed", "sold_out"}:
+                        break
+                    continue
+
+                if reserve_status in {"closed", "sold_out"}:
+                    break
+                if reserve_status == "not_started":
+                    continue
+
+                if reserve_status == "error" and reserve_response.get("code") == "no_zone_available":
+                    if self.ticket_state.sales_closed() or self.ticket_state.sold_out_event.is_set() or not self._type_can_keep_trying(client_type):
+                        break
+                    continue
+
+                continue
+
+            with self.lock:
+                if purchased:
+                    stats["success"] += 1
+                else:
+                    stats["fail"] += 1
+
+        threads = []
+        for buyer_number in range(1, buyers + 1):
+            thread = threading.Thread(target=buyer_worker, args=(buyer_number,), daemon=True)
+            threads.append(thread)
+            thread.start()
+            time.sleep(0.001)
+
+        for thread in threads:
+            thread.join()
+
+        elapsed = 0.0
+        return {
+            "buyers": buyers,
+            "client_type": client_type,
+            "success": stats["success"],
+            "fail": stats["fail"],
+            "elapsed": elapsed,
+        }
+
+    def _type_can_keep_trying(self, client_type):
+        zones = ALLOWED_ZONES_BY_TYPE.get((client_type or TIPO_NORMAL).lower(), ALLOWED_ZONES_BY_TYPE[TIPO_NORMAL])
+        snapshot = self.ticket_state.get_snapshot()
+        seat_status = snapshot.get("seat_status") or []
+        for row_index, row in enumerate(seat_status):
+            if row_index <= 2 and ZONA_PLATINO not in zones:
+                continue
+            if 3 <= row_index <= 6 and ZONA_PREFERENTE not in zones:
+                continue
+            if row_index >= 7 and ZONA_NORMAL not in zones:
+                continue
+            if any(state == "FREE" for state in row):
+                return True
+        return False
+
+    def snapshot(self):
+        with self.lock:
+            jobs = []
+            for job in self.jobs.values():
+                item = dict(job)
+                if item.get("finished_at") is not None and item.get("started_at") is not None:
+                    item["elapsed"] = item["finished_at"] - item["started_at"]
+                jobs.append(item)
+            jobs.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+            return jobs
+
+    def clear_jobs(self):
+        with self.lock:
+            self.jobs.clear()
+
+
 class TicketServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
@@ -757,6 +912,7 @@ class TicketServer(socketserver.ThreadingTCPServer):
         self.all_ready_event = threading.Event()
         self.global_start_event = threading.Event()
         self.coordinator_client = None
+        self.dashboard_loads = DashboardLoadManager(ticket_state)
         self.countdown_started_at = None
         self.countdown_duration = 0.0
         if not self.use_global_sync:
@@ -1590,6 +1746,46 @@ def create_api(ticket_state, server):
         request_id = data.get('request_id') or str(uuid.uuid4())
         resp = ticket_state.purchase(buyer_id, reservation_id, request_id)
         return jsonify(resp)
+
+    @app.route('/dashboard', defaults={'path': 'index.html'}, methods=['GET'])
+    @app.route('/dashboard/<path:path>', methods=['GET'])
+    def dashboard_files(path):
+        if not DASHBOARD_DIR.exists():
+            return jsonify({'status': 'error', 'code': 'dashboard_missing'}), 404
+        target = DASHBOARD_DIR / path
+        if target.is_dir():
+            target = target / 'index.html'
+        if not target.exists():
+            return jsonify({'status': 'error', 'code': 'not_found'}), 404
+        return send_from_directory(DASHBOARD_DIR, path)
+
+    @app.route('/dashboard/api/stats', methods=['GET'])
+    def dashboard_stats():
+        snap = ticket_state.get_snapshot()
+        snap['sale_status'] = server.get_sale_status()
+        snap['load_jobs'] = server.dashboard_loads.snapshot()
+        snap['dashboard'] = True
+        return jsonify(snap)
+
+    @app.route('/dashboard/api/generate-load', methods=['POST'])
+    def dashboard_generate_load():
+        data = request.get_json() or {}
+        buyers = int(data.get('buyers') or 50)
+        client_type = data.get('client_type') or TIPO_NORMAL
+        job = server.dashboard_loads.start_job(buyers=buyers, client_type=client_type)
+        return jsonify({'status': 'ok', 'job': job}), 202
+
+    @app.route('/dashboard/api/restart-sale', methods=['POST'])
+    def dashboard_restart_sale():
+        ticket_state.reset_sale()
+        server.dashboard_loads.clear_jobs()
+        tickets_path = Path(__file__).resolve().parent / 'tickets' / 'tickets.txt'
+        try:
+            if tickets_path.exists():
+                tickets_path.write_text('', encoding='utf-8')
+        except Exception:
+            pass
+        return jsonify({'status': 'ok', 'message': 'sale_restarted'})
 
     return app
 

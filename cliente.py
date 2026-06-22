@@ -319,6 +319,31 @@ def buyer_worker(local_buyer_number, host, port, client_id, client_type):
             metrics["attempts_fail"] += attempts
 
 
+def run_client_load(host, port, client_id, client_type, buyers):
+    global sales_start_ts, sales_end_ts
+
+    threads.clear()
+    sales_start_ts = time.perf_counter()
+
+    for buyer_number in range(1, buyers + 1):
+        thread = threading.Thread(
+            target=buyer_worker,
+            args=(buyer_number, host, port, client_id, client_type),
+            daemon=False,
+        )
+        threads.append(thread)
+        thread.start()
+        time.sleep(0.0005)
+
+    for thread in threads:
+        thread.join()
+
+    notify_client_done(host, port, client_id)
+
+    sales_end_ts = time.perf_counter()
+    print_summary(client_id, client_type, buyers)
+
+
 def print_summary(client_id, client_type, buyers_count):
     success = metrics["buyers_success"]
     fail = metrics["buyers_fail"]
@@ -409,25 +434,7 @@ def main():
     health_thread = threading.Thread(target=monitor_server_health, args=(args.host, args.port), daemon=True)
     health_thread.start()
 
-    sales_start_ts = time.perf_counter()
-
-    for buyer_number in range(1, args.buyers + 1):
-        thread = threading.Thread(
-            target=buyer_worker,
-            args=(buyer_number, args.host, args.port, client_id, normalized_type),
-            daemon=False,
-        )
-        threads.append(thread)
-        thread.start()
-        time.sleep(0.0005)
-
-    for thread in threads:
-        thread.join()
-
-    notify_client_done(args.host, args.port, client_id)
-
-    sales_end_ts = time.perf_counter()
-    print_summary(client_id, normalized_type, args.buyers)
+    run_client_load(args.host, args.port, client_id, normalized_type, args.buyers)
 
 
 if __name__ == "__main__":
