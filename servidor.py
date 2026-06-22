@@ -1670,6 +1670,16 @@ def create_api(ticket_state, server):
         resp = ticket_state.purchase(buyer_id, reservation_id, request_id)
         return jsonify(resp)
 
+    @app.route('/api/release_reservation', methods=['POST'])
+    @app.route('/api/release', methods=['POST'])
+    def api_release_reservation():
+        data = request.get_json() or {}
+        buyer_id = data.get('buyer_id')
+        reservation_id = data.get('reservation_id')
+        request_id = data.get('request_id') or str(uuid.uuid4())
+        resp = ticket_state.release_reservation(buyer_id, reservation_id, request_id)
+        return jsonify(resp)
+
     @app.route('/dashboard', defaults={'path': 'index.html'}, methods=['GET'])
     @app.route('/dashboard/<path:path>', methods=['GET'])
     def dashboard_files(path):

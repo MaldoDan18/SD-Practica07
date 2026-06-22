@@ -13,6 +13,7 @@ const elements = {
   loadStatus: document.getElementById('loadStatus'),
   seatTypeGrid: document.getElementById('seatTypeGrid'),
   miniSeatMap: document.getElementById('miniSeatMap'),
+  metricsList: document.getElementById('metricsList'),
   eventsList: document.getElementById('eventsList'),
   generateBtn: document.getElementById('generateBtn'),
   restartBtn: document.getElementById('restartBtn'),
@@ -41,6 +42,28 @@ function showToast(title, message, variant = 'info') {
   window.setTimeout(() => {
     toast.remove();
   }, 4200);
+}
+
+function formatMetricRows(metrics) {
+  const rows = [
+    ['Reservas solicitadas', metrics.request_ticket_count],
+    ['Reservas aceptadas', metrics.request_ticket_ok],
+    ['Compras procesadas', metrics.purchase_count],
+    ['Compras exitosas', metrics.purchase_ok],
+    ['Compras rechazadas', metrics.purchase_rejected],
+    ['Tickets solicitados', metrics.ticket_request_count],
+    ['Tickets emitidos', metrics.ticket_request_ok],
+    ['Tickets fallidos', metrics.ticket_request_fail],
+    ['Liberaciones por expiración', metrics.expired_releases],
+    ['Solicitudes antes del inicio', metrics.not_started_count],
+  ];
+
+  return rows.map(([label, value]) => `
+    <div class="metric-row">
+      <span>${escapeText(label)}</span>
+      <strong>${escapeText(value ?? 0)}</strong>
+    </div>
+  `).join('');
 }
 
 function renderSeatTypes(seatsByType) {
@@ -175,6 +198,7 @@ function updateSummary(stats) {
   elements.tickets.textContent = stats.metrics?.ticket_request_ok ?? 0;
   elements.buyersCreated.textContent = stats.buyers_created ?? 0;
 
+  elements.metricsList.innerHTML = formatMetricRows(stats.metrics || {});
   renderSeatTypes(stats.seats_by_type || {});
   renderMiniMap(stats.seat_status || []);
   renderEvents(stats.recent_events || []);
