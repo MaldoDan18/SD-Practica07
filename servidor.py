@@ -407,6 +407,7 @@ class TicketState:
                         self._cleanup_expired_zone_locked(seat_zone)
                         if self.seat_status[row][col] == "FREE":
                             reservation_id = str(uuid.uuid4())
+                            self.zone_free_seats[seat_zone].discard((row, col))
                             self.seat_status[row][col] = "RESERVED"
                             self.reservations_by_zone[seat_zone][reservation_id] = {
                                 "buyer_id": str(buyer_id),
