@@ -121,6 +121,7 @@ def read_control_message(sock_file):
 
 
 def register_and_wait_start(host, port, client_id, client_type, buyers_count):
+    buyer_ids = [f"{client_id}-B{buyer_number}" for buyer_number in range(1, buyers_count + 1)]
     with socket.create_connection((host, port), timeout=SOCKET_TIMEOUT) as sock:
         sock.settimeout(None)
         with sock.makefile("rwb") as sock_file:
@@ -133,6 +134,7 @@ def register_and_wait_start(host, port, client_id, client_type, buyers_count):
                     "client_id": client_id,
                     "client_type": client_type,
                     "buyers": buyers_count,
+                    "buyer_ids": buyer_ids,
                 },
             )
             response = read_control_message(sock_file)

@@ -1032,8 +1032,9 @@ class TicketServer(socketserver.ThreadingTCPServer):
             "expected_clients": self.expected_clients,
         }
 
-    def register_client(self, client_id, client_type, buyers_count):
+    def register_client(self, client_id, client_type, buyers_count, buyer_ids=None):
         should_activate = False
+        buyer_ids = list(buyer_ids or [])
         with self.registration_lock:
             self.connected_clients[client_id] = {
                 "client_type": client_type,
@@ -1041,6 +1042,11 @@ class TicketServer(socketserver.ThreadingTCPServer):
                 "connected_at": time.strftime("%H:%M:%S"),
             }
             self.ticket_state.register_client_buyers(client_type, buyers_count)
+            if buyer_ids:
+                for buyer_id in buyer_ids:
+                    self.ticket_state.register_buyer(buyer_id)
+            elif buyers_count == 1:
+                self.ticket_state.register_buyer(client_id)
             connected = len(self.connected_clients)
             if not self.start_event.is_set():
                 should_activate = True
@@ -1122,12 +1128,13 @@ class TicketRequestHandler(socketserver.StreamRequestHandler):
                 client_id = payload.get("client_id")
                 client_type = (payload.get("client_type") or "").lower()
                 buyers_count = int(payload.get("buyers", 0))
+                buyer_ids = payload.get("buyer_ids") or []
 
                 if not client_id:
                     self.send_json({"type": "ERROR", "code": "missing_client_id"})
                     continue
 
-                connected = self.server.register_client(client_id, client_type, buyers_count)
+                connected = self.server.register_client(client_id, client_type, buyers_count, buyer_ids=buyer_ids)
                 self.send_json({
                     "type": "REGISTERED",
                     "client_id": client_id,
@@ -1626,10 +1633,11 @@ def create_api(ticket_state, server):
         client_id = data.get('client_id')
         client_type = data.get('client_type', TIPO_NORMAL)
         buyers = int(data.get('buyers', 1))
+        buyer_ids = data.get('buyer_ids') or []
         if not client_id:
             return jsonify({'type': 'ERROR', 'code': 'missing_client_id'}), 400
         try:
-            connected = server.register_client(client_id, client_type, buyers)
+            connected = server.register_client(client_id, client_type, buyers, buyer_ids=buyer_ids)
             return jsonify({'type': 'REGISTERED', 'client_id': client_id, 'connected_clients': connected, 'expected_clients': server.expected_clients})
         except Exception as exc:
             return jsonify({'type': 'ERROR', 'message': str(exc)}), 500

@@ -375,7 +375,7 @@ async function fetchAvailability(){
 
 async function registerPWA(){
   try{
-    const payload = { client_id: localClientId, client_type: buyerTypeEl.value || 'normal', buyers: 1 };
+    const payload = { client_id: localClientId, client_type: buyerTypeEl.value || 'normal', buyers: 1, buyer_ids: [localBuyerId] };
     const res = await fetch(API_BASE + '/api/register_client', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     if(!res.ok) {
       const txt = await res.text();
