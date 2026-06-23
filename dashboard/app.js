@@ -24,6 +24,7 @@ const elements = {
   overlay: document.getElementById('overlay'),
   overlayTitle: document.getElementById('overlayTitle'),
   overlayText: document.getElementById('overlayText'),
+  overlayRestartBtn: document.getElementById('overlayRestartBtn'),
 };
 
 let pollingHandle = null;
@@ -173,6 +174,9 @@ function updateOverlay(state, closeReason) {
     elements.overlay.setAttribute('aria-hidden', 'false');
     elements.overlayTitle.textContent = 'Venta cerrada';
     elements.overlayText.textContent = closeReason ? `Motivo: ${closeReason}` : 'La venta terminó.';
+    if (elements.overlayRestartBtn) {
+      elements.overlayRestartBtn.disabled = false;
+    }
   } else {
     elements.overlay.classList.add('hidden');
     elements.overlay.setAttribute('aria-hidden', 'true');
@@ -284,6 +288,9 @@ function startPolling() {
 
 elements.generateBtn.addEventListener('click', generateLoad);
 elements.restartBtn.addEventListener('click', restartSale);
+if (elements.overlayRestartBtn) {
+  elements.overlayRestartBtn.addEventListener('click', restartSale);
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   await fetchStats();

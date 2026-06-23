@@ -91,6 +91,7 @@ button:disabled { opacity: .65; cursor: progress; transform: none; }
 .overlay-kicker { text-transform: uppercase; letter-spacing: .16em; color: var(--muted); font-size: 12px; margin-bottom: 10px; }
 .overlay-card h2 { margin: 0; font-size: 30px; }
 .overlay-card p { margin: 10px 0 0; color: #cad6f4; }
+.overlay-actions { margin-top: 18px; display: flex; justify-content: center; }
 @media (max-width: 1100px) {
   .hero, .dashboard { grid-template-columns: 1fr; }
   .toolbar { grid-template-columns: 1fr; }

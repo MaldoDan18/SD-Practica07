@@ -324,7 +324,6 @@ class TicketState:
                 self.sales_finished_at = time.perf_counter()
             self.close_reason = "all_sold"
             self.sales_closed_event.set()
-            self.sold_out_event.set()
             return True
                 # Do NOT close for unsellable_remaining; let Ctrl+C terminate or the dashboard reset the sale
         return False
@@ -640,7 +639,8 @@ class TicketState:
 
                 if self.sold_count >= TOTAL_ASIENTOS and not self.sold_out_event.is_set():
                     self.sales_finished_at = time.perf_counter()
-                    self.sold_out_event.set()
+                    self.sales_closed_event.set()
+                    self.close_reason = "all_sold"
 
                 remaining = TOTAL_ASIENTOS - self.sold_count
                 sold_now = self.sold_count
