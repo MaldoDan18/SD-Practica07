@@ -16,10 +16,7 @@ const purchaseList = document.getElementById('purchaseList');
 const findSeatBtn = document.getElementById('findSeatBtn');
 const findPurchasesBtn = document.getElementById('findPurchasesBtn');
 const logEl = document.getElementById('log');
-const saleOverlay = document.getElementById('saleOverlay');
-const saleOverlayTitle = document.getElementById('saleOverlayTitle');
-const saleOverlayText = document.getElementById('saleOverlayText');
-const saleOverlayTimer = document.getElementById('saleOverlayTimer');
+const soldOutBanner = document.getElementById('soldOutBanner');
 
 const STATE_VERSION = '9';
 
@@ -319,24 +316,17 @@ function formatCountdown(seconds){
   return minutes > 0 ? `${minutes}:${String(remainingSeconds).padStart(2, '0')}` : `${remainingSeconds}s`;
 }
 
-function updateSaleOverlay(){
-  const state = saleStatus.state || 'loading';
-  if(state === 'closed'){
-    saleOverlay.classList.remove('hidden');
-    saleOverlayTitle.textContent = '✓ La venta ha concluido';
-    const reason = saleStatus.close_reason || 'unknown';
-    if(reason === 'all_sold'){
-      saleOverlayText.textContent = 'Todos los asientos se vendieron exitosamente.';
-    } else if(reason === 'all_clients_done'){
-      saleOverlayText.textContent = 'La venta terminó cuando los clientes completaron su operación.';
-    } else {
-      saleOverlayText.textContent = 'La simulación ha finalizado.';
-    }
-    saleOverlayTimer.textContent = '';
-    return;
-  }
+function updateSoldOutBanner(){
+  if (!soldOutBanner) return;
 
-  saleOverlay.classList.add('hidden');
+  const isSoldOut = saleStatus.sales_closed || saleStatus.state === 'closed';
+  const isAllSold = saleStatus.close_reason === 'all_sold';
+
+  if (isSoldOut && isAllSold) {
+    soldOutBanner.classList.remove('hidden');
+  } else {
+    soldOutBanner.classList.add('hidden');
+  }
 }
 
 function adjustSideDock() {
@@ -365,11 +355,11 @@ async function fetchAvailability(){
     availability = data.seat_status || [];
     syncCartWithAvailability(availability);
     renderSeats();
-    updateSaleOverlay();
+    updateSoldOutBanner();
   }catch(err){
     log('No se pudo obtener disponibilidad: '+err.message);
     saleStatus = { state: 'offline', sales_open: false, sales_closed: false };
-    updateSaleOverlay();
+    updateSoldOutBanner();
   }
 }
 
@@ -591,7 +581,7 @@ if('serviceWorker' in navigator){
 loadCartState();
 clearPurchasesOnStartup();
 refreshPanels();
-updateSaleOverlay();
+updateSoldOutBanner();
 registerPWA();  // Register as client BEFORE fetching availability
 fetchAvailability();
 startPolling();
