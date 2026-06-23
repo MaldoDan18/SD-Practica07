@@ -867,7 +867,6 @@ class DashboardLoadManager:
         def buyer_worker(buyer_number):
             buyer_id = f"DASH-{uuid.uuid4().hex[:6].upper()}-B{buyer_number}"
             purchased = False
-            consecutive_no_zone = 0
 
             while not self.ticket_state.sales_closed() and not self.ticket_state.sold_out_event.is_set():
                 time.sleep(random.uniform(*worker_delay))
@@ -878,7 +877,6 @@ class DashboardLoadManager:
                 reserve_response = self.ticket_state.request_ticket(buyer_id, client_type, str(uuid.uuid4()))
                 reserve_status = reserve_response.get("status")
                 if reserve_status == "ok":
-                    consecutive_no_zone = 0
                     reservation_id = reserve_response.get("reservation_id")
                     if not reservation_id:
                         continue
@@ -901,17 +899,16 @@ class DashboardLoadManager:
                     continue
 
                 if reserve_status == "error" and reserve_response.get("code") == "no_zone_available":
-                    consecutive_no_zone += 1
-                    if self.ticket_state.sales_closed() or self.ticket_state.sold_out_event.is_set() or not self._type_can_keep_trying(client_type):
+                    if self.ticket_state.sales_closed() or self.ticket_state.sold_out_event.is_set():
                         break
-                    if consecutive_no_zone < 8:
-                        continue
-                    time.sleep(0.01)
+                    time.sleep(0.02)
                     continue
 
                 if reserve_status == "error" and reserve_response.get("code") in {"zone_busy", "zone_busy_retry"}:
+                    time.sleep(0.01)
                     continue
 
+                time.sleep(0.01)
                 continue
 
             with self.lock:

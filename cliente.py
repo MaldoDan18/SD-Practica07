@@ -198,10 +198,9 @@ def buyer_worker(local_buyer_number, host, port, client_id, client_type):
     purchase_time_accum = 0.0
     attempts = 0
     purchased = False
-    consecutive_network_errors = 0
 
     while not sold_out_event.is_set():
-        pause = random.uniform(0.1, 2.0)
+        pause = random.uniform(0.02, 0.2)
         time.sleep(pause)
         wait_random_accum += pause
 
@@ -216,13 +215,10 @@ def buyer_worker(local_buyer_number, host, port, client_id, client_type):
         request_started = time.perf_counter()
         try:
             request_response = send_request(host, port, request_payload)
-            consecutive_network_errors = 0
         except Exception:
             with stats_lock:
                 metrics["network_errors"] += 1
-            consecutive_network_errors += 1
-            if consecutive_network_errors >= 25:
-                break
+            time.sleep(0.05)
             continue
 
         request_elapsed = time.perf_counter() - request_started
@@ -237,14 +233,14 @@ def buyer_worker(local_buyer_number, host, port, client_id, client_type):
             sold_out_event.set()
             break
         if request_status == "not_started":
-            time.sleep(0.15)
+            time.sleep(0.05)
             continue
         if request_status == "sold_out":
             sold_out_event.set()
             break
         if request_status != "ok":
             if request_status == "error" and request_response.get("code") == "no_zone_available":
-                time.sleep(0.12)
+                time.sleep(0.05)
             continue
 
         reservation_id = request_response.get("reservation_id")
@@ -261,13 +257,10 @@ def buyer_worker(local_buyer_number, host, port, client_id, client_type):
         purchase_started = time.perf_counter()
         try:
             purchase_response = send_request(host, port, purchase_payload)
-            consecutive_network_errors = 0
         except Exception:
             with stats_lock:
                 metrics["network_errors"] += 1
-            consecutive_network_errors += 1
-            if consecutive_network_errors >= 25:
-                break
+            time.sleep(0.05)
             continue
 
         purchase_elapsed = time.perf_counter() - purchase_started
@@ -282,11 +275,14 @@ def buyer_worker(local_buyer_number, host, port, client_id, client_type):
             sold_out_event.set()
             break
         if purchase_status == "not_started":
-            time.sleep(0.15)
+            time.sleep(0.05)
             continue
         if purchase_status == "sold_out":
             sold_out_event.set()
             break
+        if purchase_status == "error":
+            time.sleep(0.05)
+            continue
         if purchase_status == "ok":
             purchased = True
             if purchase_response.get("remaining", 1) <= 0:
