@@ -21,10 +21,7 @@ const elements = {
   buyerType: document.getElementById('buyerType'),
   lastRefresh: document.getElementById('lastRefresh'),
   toastArea: document.getElementById('toastArea'),
-  overlay: document.getElementById('overlay'),
-  overlayTitle: document.getElementById('overlayTitle'),
-  overlayText: document.getElementById('overlayText'),
-  overlayRestartBtn: document.getElementById('overlayRestartBtn'),
+  closedSaleNoticeArea: document.getElementById('closedSaleNoticeArea'),
 };
 
 let pollingHandle = null;
@@ -43,6 +40,32 @@ function showToast(title, message, variant = 'info') {
   window.setTimeout(() => {
     toast.remove();
   }, 4200);
+}
+
+function clearClosedSaleNotice() {
+  if (elements.closedSaleNoticeArea) {
+    elements.closedSaleNoticeArea.innerHTML = '';
+  }
+}
+
+function renderClosedSaleNotice(closeReason) {
+  if (!elements.closedSaleNoticeArea) return;
+
+  const reasonText = closeReason ? `Motivo: ${closeReason}` : 'La venta terminó.';
+  elements.closedSaleNoticeArea.innerHTML = `
+    <div class="closed-sale-notice">
+      <div class="closed-sale-notice-head">Venta cerrada</div>
+      <div class="closed-sale-notice-body">${escapeText(reasonText)}</div>
+      <div class="closed-sale-notice-actions">
+        <button id="closedSaleRestartBtn" class="primary">Reiniciar venta</button>
+      </div>
+    </div>
+  `;
+
+  const restartButton = document.getElementById('closedSaleRestartBtn');
+  if (restartButton) {
+    restartButton.addEventListener('click', restartSale);
+  }
 }
 
 function formatMetricRows(metrics) {
@@ -168,21 +191,6 @@ function renderLoadJobs(loadJobs) {
   elements.loadStatus.textContent = `Carga ${activeJob.job_id} · ${activeJob.status} · ${elapsed}${result ? ` · ${result}` : ''}`;
 }
 
-function updateOverlay(state, closeReason) {
-  if (state === 'closed') {
-    elements.overlay.classList.remove('hidden');
-    elements.overlay.setAttribute('aria-hidden', 'false');
-    elements.overlayTitle.textContent = 'Venta cerrada';
-    elements.overlayText.textContent = closeReason ? `Motivo: ${closeReason}` : 'La venta terminó.';
-    if (elements.overlayRestartBtn) {
-      elements.overlayRestartBtn.disabled = false;
-    }
-  } else {
-    elements.overlay.classList.add('hidden');
-    elements.overlay.setAttribute('aria-hidden', 'true');
-  }
-}
-
 function updateSummary(stats) {
   const saleStatus = stats.sale_status || {};
   const state = saleStatus.state || (stats.sales_closed ? 'closed' : (stats.sales_open ? 'open' : 'waiting'));
@@ -218,7 +226,11 @@ function updateSummary(stats) {
     }
   }
 
-  updateOverlay(state, stats.close_reason);
+  if (state === 'closed') {
+    renderClosedSaleNotice(stats.close_reason);
+  } else {
+    clearClosedSaleNotice();
+  }
   elements.lastRefresh.textContent = `Actualizado ${new Date().toLocaleTimeString()}`;
 }
 
@@ -232,7 +244,7 @@ async function fetchStats() {
     elements.statusBadge.textContent = 'Offline';
     elements.statusText.textContent = `No se pudo conectar: ${error.message}`;
     elements.lastRefresh.textContent = `Error ${new Date().toLocaleTimeString()}`;
-    updateOverlay('waiting');
+    clearClosedSaleNotice();
   }
 }
 
@@ -261,10 +273,14 @@ async function generateLoad() {
 async function restartSale() {
   if (!confirm('¿Reiniciar la venta? Se limpiarán reservas, eventos y cargas.')) return;
   elements.restartBtn.disabled = true;
-  elements.overlay.classList.remove('hidden');
-  elements.overlay.setAttribute('aria-hidden', 'false');
-  elements.overlayTitle.textContent = 'Reiniciando venta...';
-  elements.overlayText.textContent = 'Limpieza de estado en curso.';
+  if (elements.closedSaleNoticeArea) {
+    elements.closedSaleNoticeArea.innerHTML = `
+      <div class="closed-sale-notice">
+        <div class="closed-sale-notice-head">Reiniciando venta...</div>
+        <div class="closed-sale-notice-body">Limpieza de estado en curso.</div>
+      </div>
+    `;
+  }
 
   try {
     const response = await fetch(`${API_BASE}/restart-sale`, { method: 'POST' });
@@ -288,9 +304,6 @@ function startPolling() {
 
 elements.generateBtn.addEventListener('click', generateLoad);
 elements.restartBtn.addEventListener('click', restartSale);
-if (elements.overlayRestartBtn) {
-  elements.overlayRestartBtn.addEventListener('click', restartSale);
-}
 
 document.addEventListener('DOMContentLoaded', async () => {
   await fetchStats();
